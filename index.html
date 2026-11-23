@@ -60,6 +60,10 @@ h2{font-size:1rem;margin:0 0 10px;font-weight:650}
   background:var(--accent);color:var(--accent-ink);font-size:1.25rem;font-weight:700;cursor:pointer;
   box-shadow:0 6px 18px rgba(15,118,110,.25);transition:transform .08s}
 .bigbtn:active,.resistbtn:active{transform:scale(.97)}
+.bigbtn.wait{background:var(--muted);box-shadow:none}
+.bigsub{display:block;font-size:.85rem;font-weight:600;opacity:.9;margin-top:4px}
+.gapbox{margin-top:12px}
+.progress.wait i{background:var(--accent)}
 .resistbtn{display:block;width:100%;margin:0 0 14px;padding:15px 16px;border:2px solid var(--good);border-radius:20px;
   background:var(--good-soft);color:var(--good);font-size:1.02rem;font-weight:700;cursor:pointer;transition:transform .08s}
 .since{font-size:1.5rem;font-weight:700;font-variant-numeric:tabular-nums}
@@ -183,13 +187,17 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
       <div class="compare same" id="compare" hidden></div>
     </div>
 
-    <button class="bigbtn" id="smokeBtn">Ich rauche jetzt eine</button>
+    <button class="bigbtn" id="smokeBtn"><span>Ich rauche jetzt eine</span><span class="bigsub" id="smokeSub" hidden></span></button>
     <button class="resistbtn" id="resistBtn">Hatte Lust – aber widerstanden</button>
 
     <div class="card">
       <div class="muted small">Rauchfrei seit</div>
       <div class="since" id="since">–</div>
       <div class="muted small" id="lastAt"></div>
+      <div class="gapbox" id="gapBox" hidden>
+        <div class="progress" id="gapBar"><i></i></div>
+        <div class="goaltext" id="gapText"></div>
+      </div>
     </div>
 
     <div class="card">
@@ -311,6 +319,10 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
         <div><label for="setPrice">Preis pro Schachtel (€)</label><input type="text" id="setPrice" inputmode="decimal" placeholder="z. B. 9,20"></div>
         <div><label for="setPack">Stück pro Schachtel</label><input type="number" id="setPack" min="1" max="100" inputmode="numeric" placeholder="20"></div>
       </div>
+      <label for="setGap">Mindestabstand zwischen zwei Zigaretten (Minuten)</label>
+      <input type="number" id="setGap" min="0" max="1440" inputmode="numeric" placeholder="z. B. 60 – leer = aus">
+      <label for="setGapStep">Jede Woche automatisch verlängern um (Minuten)</label>
+      <input type="number" id="setGapStep" min="0" max="240" inputmode="numeric" placeholder="z. B. 10 – leer = nicht verlängern">
       <label for="setStart">Ersparnis zählen ab</label>
       <input type="date" id="setStart">
       <button class="btn block" id="saveSettings">Speichern</button>
@@ -540,6 +552,19 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
   function avgDays(byDay, fromDay, n){ let s=0; for (let i=0;i<n;i++) s += byDay.get(addDays(fromDay,i))||0; return s/n; }
 
   // Ziel
+  // Mindestabstand (in Minuten) für einen Tag; verlängert sich ggf. wöchentlich
+  function gapRule(day){
+    let r = null;
+    (settings.gapHist||[]).forEach(e => { if (e[0] <= day) r = e; });
+    return r && r[1] ? { from:r[0], min:r[1], step:r[2]||0 } : null;
+  }
+  function gapFor(ts){
+    const day = dayStart(ts), r = gapRule(day);
+    if (!r) return 0;
+    return (r.min + Math.floor(daysBetween(r.from, day) / 7) * r.step) * 60000;
+  }
+  const fmtDur = (ms, down) => { const m = Math.max(0, (down ? Math.floor : Math.ceil)(ms/60000)), h = Math.floor(m/60); return h ? `${h} Std ${pad(m%60)} Min` : `${m} Min`; };
+
   function goalFor(day){
     let g = null;
     (settings.goalHist||[]).forEach(([d,n]) => { if (d <= day) g = n; });
@@ -658,6 +683,8 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
         body: JSON.stringify({ state:String(t), attributes:{
           friendly_name:"Zigaretten heute", unit_of_measurement:"Zigaretten", icon:"mdi:smoking", state_class:"measurement",
           gestern: d.byDay.get(addDays(today,-1)) || 0, durchschnitt_7_tage: Math.round(s7/7*10)/10,
+          mindestabstand_min: gapFor(Date.now()) / 60000 || null,
+          naechste_ab: (last && gapFor(Date.now())) ? new Date(last + gapFor(Date.now())).toISOString() : null,
           ziel: g, noch_uebrig: g == null ? null : Math.max(0, g - t),
           widerstanden_heute: d.crByDay.get(today) || 0,
           gespart_eur: sv ? Math.round(sv.sum*100)/100 : null,
@@ -798,6 +825,13 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
         svg += `<line x1="${nx}" x2="${R}" y1="${y}" y2="${y}" stroke="var(--card)" stroke-width="2" stroke-dasharray="2 3"/>`;
         svg += `<line x1="${nx}" x2="${nx}" y1="${y-10}" y2="${y+10}" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"><title>jetzt</title></line>`;
       }
+      if (i === 1){
+        const cg = D().cig, lastC = cg[cg.length-1], gp = lastC ? gapFor(lastC) : 0;
+        if (gp && lastC + gp > today){
+          const x0 = x(Math.max(lastC, today), today), x1 = x(Math.min(lastC + gp, addDays(today,1)), today);
+          svg += `<rect x="${x0}" y="${y-7}" width="${Math.max(0, x1-x0)}" height="14" rx="7" fill="var(--good)" opacity=".3"><title>Wartezeit bis ${fmtTime(lastC + gp)} Uhr</title></rect>`;
+        }
+      }
       row.items.forEach(r => {
         const cx = x(r.ts, row.day);
         if (r.k === "v") svg += `<circle cx="${cx}" cy="${y}" r="4.5" fill="var(--card)" stroke="var(--good)" stroke-width="2.2"><title>${fmtTime(r.ts)} Uhr – widerstanden</title></circle>`;
@@ -820,8 +854,29 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
     } else $("ydGap").textContent = "";
   }
 
+  function renderGap(last){
+    const gap = gapFor(Date.now());
+    const btn = $("smokeBtn"), sub = $("smokeSub"), box = $("gapBox");
+    if (!gap || !last){ box.hidden = true; sub.hidden = true; btn.classList.remove("wait"); return; }
+    const el = Date.now() - last, rem = gap - el;
+    box.hidden = false;
+    $("gapBar").firstElementChild.style.width = Math.min(100, el/gap*100) + "%";
+    $("gapBar").classList.toggle("wait", rem > 0);
+    const gt = $("gapText");
+    if (rem > 0){
+      gt.textContent = `Noch ${fmtDur(rem)} – frühestens um ${fmtTime(last + gap)} Uhr (Abstand ${fmtDur(gap)})`;
+      gt.className = "goaltext"; gt.style.color = "var(--accent)";
+      sub.hidden = false; sub.textContent = `Abstand: noch ${fmtDur(rem)}`; btn.classList.add("wait");
+    } else {
+      gt.textContent = `Abstand von ${fmtDur(gap)} erreicht ✓`;
+      gt.className = "goaltext good"; gt.style.color = "";
+      sub.hidden = true; btn.classList.remove("wait");
+    }
+  }
+
   function renderSince(){
     const c = D().cig, last = c[c.length-1];
+    renderGap(last);
     if (!last){ $("since").textContent = "–"; $("lastAt").textContent = "Noch keine Zigarette erfasst"; return; }
     const ms = Math.max(0, Date.now() - last);
     const m = Math.floor(ms/60000), h = Math.floor(m/60), dd = Math.floor(h/24);
@@ -968,6 +1023,18 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
     }
     const nv = inRange.filter(r => r.k === "v").length;
     if (nv) txt += ` ${nv}× Verlangen widerstanden.`;
+    // Abstände innerhalb eines Tages
+    {
+      const cg = d.cig; let gN = 0, gOk = 0, gSum = 0, gCnt = 0;
+      for (let i = 1; i < cg.length; i++){
+        if (cg[i] < start || cg[i] >= end) continue;
+        if (dayStart(cg[i]) !== dayStart(cg[i-1])) continue;
+        const g = cg[i] - cg[i-1]; gSum += g; gCnt++;
+        const rule = gapFor(cg[i]); if (rule){ gN++; if (g >= rule) gOk++; }
+      }
+      if (gCnt) txt += ` Ø Abstand zwischen zwei Zigaretten: ${fmtDur(gSum/gCnt, true)}.`;
+      if (gN) txt += ` Mindestabstand bei ${gOk} von ${gN} ${gN === 1 ? "Zigarette" : "Zigaretten"} eingehalten (${Math.round(gOk/gN*100)} %).`;
+    }
     $("trendText").textContent = txt;
 
     // Auslöser
@@ -1082,10 +1149,15 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
   const buzz = () => { try{ navigator.vibrate && navigator.vibrate(30); }catch(e){} };
   $("smokeBtn").onclick = () => {
     buzz();
+    const prevC = D().cig, prev = prevC[prevC.length-1], gp = gapFor(Date.now());
     const id = addRec(Date.now(), "z");
     const t = D().byDay.get(dayStart(Date.now())) || 0, g = goalFor(dayStart(Date.now()));
     let title = `Erfasst um ${fmtTime(Date.now())} Uhr`;
     if (g != null) title += t <= g ? ` · noch ${g - t} bis zum Ziel` : ` · ${t - g} über dem Ziel`;
+    if (gp && prev){
+      const el = Date.now() - prev;
+      title += el >= gp ? " · Abstand eingehalten ✓" : ` · Abstand ${fmtDur(el, true)} von ${fmtDur(gp)}`;
+    }
     openSheet(id, title);
   };
   $("resistBtn").onclick = () => {
@@ -1148,6 +1220,9 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
     $("setBase").value = settings.baseline ? String(settings.baseline).replace(".", ",") : "";
     $("setPrice").value = settings.price ? Number(settings.price).toFixed(2).replace(".", ",") : "";
     $("setPack").value = settings.perPack || "";
+    const gr = gapRule(today);
+    $("setGap").value = gr ? gapFor(Date.now()) / 60000 : "";
+    $("setGapStep").value = gr && gr.step ? gr.step : "";
     $("setStart").value = dateKey(settings.saveStart || D().firstDay);
     $("setStart").max = todayStr;
     $("haUrl").value = cfg.url; $("haToken").value = cfg.token;
@@ -1166,9 +1241,19 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
     const hist = (settings.goalHist||[]).filter(([d]) => d !== today);
     if (goalFor(addDays(today,-1)) !== g || hist.some(([d]) => d > today)) hist.push([today, g]);
     hist.sort((a,b) => a[0]-b[0]);
+    // Mindestabstand: nur bei Änderung neu ansetzen (sonst läuft die wöchentliche Verlängerung weiter)
+    const gm = num($("setGap").value), gs = num($("setGapStep").value);
+    const newMin = gm && gm > 0 ? Math.round(gm) : null, newStep = gs && gs > 0 ? Math.round(gs) : 0;
+    const gr = gapRule(today), curMin = gr ? gapFor(Date.now()) / 60000 : null, curStep = gr ? gr.step : 0;
+    let gapHist = (settings.gapHist||[]).slice();
+    if (newMin !== curMin || newStep !== curStep){
+      gapHist = gapHist.filter(e => e[0] !== today);
+      gapHist.push([today, newMin, newStep]);
+      gapHist.sort((a,b) => a[0]-b[0]);
+    }
     const base = num($("setBase").value), price = num($("setPrice").value), pack = num($("setPack").value);
     const sv = $("setStart").value ? parseDate($("setStart").value) : null;
-    saveSettings({ goalHist: hist, baseline: base && base > 0 ? base : null, price: price && price > 0 ? price : null,
+    saveSettings({ goalHist: hist, gapHist, baseline: base && base > 0 ? base : null, price: price && price > 0 ? price : null,
                    perPack: pack && pack > 0 ? Math.round(pack) : null, saveStart: sv });
     toast("Gespeichert");
   };
