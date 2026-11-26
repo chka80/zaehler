@@ -42,7 +42,13 @@ h2{font-size:1rem;margin:0 0 10px;font-weight:650}
 .status.warn{color:var(--warn);font-weight:600}
 
 /* Heute */
-.today{text-align:center;padding:22px 16px 18px}
+.today{text-align:center;padding:46px 16px 18px;position:relative}
+.pinkbtn{position:absolute;top:12px;right:12px;font:inherit;font-size:.8rem;font-weight:700;border:0;border-radius:12px;
+  padding:7px 12px;cursor:pointer;background:#ec4899;color:#fff;box-shadow:0 3px 10px rgba(236,72,153,.3);transition:transform .08s}
+.pinkbtn:active{transform:scale(.95)}
+.pinkbtn.on{background:#fce7f3;color:#be185d;box-shadow:none;border:1.5px solid #f9a8d4}
+.pinkbtn.confirm{background:#be185d;color:#fff}
+@media (prefers-color-scheme: dark){ .pinkbtn.on{background:#3b1730;color:#f9a8d4;border-color:#9d174d} }
 .count{font-size:4.2rem;font-weight:750;line-height:1;font-variant-numeric:tabular-nums}
 .count.over{color:var(--warn)}
 .count-label{margin-top:6px}
@@ -61,6 +67,10 @@ h2{font-size:1rem;margin:0 0 10px;font-weight:650}
   box-shadow:0 6px 18px rgba(15,118,110,.25);transition:transform .08s}
 .bigbtn:active,.resistbtn:active{transform:scale(.97)}
 .bigbtn.wait{background:var(--muted);box-shadow:none}
+.count.cheat{font-size:2.4rem;color:var(--muted);padding:10px 0 4px}
+.cheatbtn{display:block;margin:-4px auto 14px;font:inherit;font-size:.88rem;background:none;border:0;color:var(--muted);text-decoration:underline;cursor:pointer;padding:6px 10px}
+.cheatbtn.confirm{color:var(--warn);font-weight:700;text-decoration:none}
+.chip.cheat{background:var(--line);color:var(--ink)}
 .bigsub{display:block;font-size:.85rem;font-weight:600;opacity:.9;margin-top:4px}
 .gapbox{margin-top:12px}
 .progress.wait i{background:var(--accent)}
@@ -178,6 +188,7 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
   <!-- HEUTE -->
   <section class="view on" id="v-heute">
     <div class="card today">
+      <button class="pinkbtn" id="cheatBtn" type="button"></button>
       <div class="count" id="todayCount">0</div>
       <div class="count-label muted" id="todayLabel">Zigaretten heute</div>
       <div class="goalbox" id="goalBox" hidden>
@@ -252,6 +263,7 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
         <h2 class="grow" style="margin:0">Einträge am</h2>
         <input type="date" id="listDate" style="width:auto">
       </div>
+      <button class="cheatbtn" id="cheatListBtn" type="button" style="margin:8px 0 0;padding:4px 0"></button>
       <ul class="list" id="dayList"></ul>
     </div>
   </section>
@@ -536,20 +548,36 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
   function saveSettings(patch){ settings = { ...settings, ...patch, u:Date.now() }; changed("§einstellungen"); }
 
   // Abgeleitete Werte (zwischengespeichert)
+  // Cheat Days: Einträge an diesen Tagen werden gespeichert, aber nirgends mitgezählt
   function D(){
     if (cache) return cache;
-    const cig = [], crav = [], byDay = new Map(), crByDay = new Map();
+    const cheat = new Set(settings.cheatDays || []);
+    const cig = [], crav = [], allCig = [], byDay = new Map(), crByDay = new Map(), rawByDay = new Map();
     recs.forEach(r => {
       const k = dayStart(r.ts);
+      if (r.k !== "v"){ allCig.push(r.ts); rawByDay.set(k, (rawByDay.get(k)||0)+1); }
+      if (cheat.has(k)) return;
       if (r.k === "v"){ crav.push(r.ts); crByDay.set(k, (crByDay.get(k)||0)+1); }
       else { cig.push(r.ts); byDay.set(k, (byDay.get(k)||0)+1); }
     });
-    cig.sort((a,b)=>a-b); crav.sort((a,b)=>a-b);
-    const all = cig.concat(crav);
-    const firstDay = all.length ? dayStart(Math.min(...all)) : dayStart(Date.now());
-    return cache = { cig, crav, byDay, crByDay, firstDay, any: recs.size > 0 };
+    cig.sort((a,b)=>a-b); crav.sort((a,b)=>a-b); allCig.sort((a,b)=>a-b);
+    let first = Infinity; recs.forEach(r => { if (r.ts < first) first = r.ts; });
+    const firstDay = recs.size ? dayStart(first) : dayStart(Date.now());
+    return cache = { cig, crav, allCig, byDay, crByDay, rawByDay, cheat, firstDay, any: recs.size > 0 };
   }
-  function avgDays(byDay, fromDay, n){ let s=0; for (let i=0;i<n;i++) s += byDay.get(addDays(fromDay,i))||0; return s/n; }
+  const isCheat = day => D().cheat.has(day);
+  // Durchschnitt über n Tage ab fromDay – Cheat Days zählen nicht mit
+  function avgDays(byDay, fromDay, n){
+    let s = 0, c = 0;
+    for (let i=0;i<n;i++){ const day = addDays(fromDay,i); if (isCheat(day)) continue; s += byDay.get(day)||0; c++; }
+    return c ? s/c : null;
+  }
+  const fmtAvg = v => v == null ? "–" : fmtNum(v);
+  function setCheat(day, on){
+    const set = new Set(settings.cheatDays || []);
+    on ? set.add(day) : set.delete(day);
+    saveSettings({ cheatDays: [...set].sort((a,b)=>a-b) });
+  }
 
   // Ziel
   // Mindestabstand (in Minuten) für einen Tag; verlängert sich ggf. wöchentlich
@@ -579,7 +607,7 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
   function savedBetween(fromDay, toDayExcl){
     const m = moneyCfg(); if (!m) return null;
     let s = 0, days = 0;
-    for (let d = Math.max(fromDay, m.start); d < toDayExcl; d = addDays(d,1)){ s += (m.base - (D().byDay.get(d)||0)) * m.ppc; days++; }
+    for (let d = Math.max(fromDay, m.start); d < toDayExcl; d = addDays(d,1)){ if (isCheat(d)) continue; s += (m.base - (D().byDay.get(d)||0)) * m.ppc; days++; }
     return { sum:s, days };
   }
 
@@ -686,7 +714,7 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
           mindestabstand_min: gapFor(Date.now()) / 60000 || null,
           naechste_ab: (last && gapFor(Date.now())) ? new Date(last + gapFor(Date.now())).toISOString() : null,
           ziel: g, noch_uebrig: g == null ? null : Math.max(0, g - t),
-          widerstanden_heute: d.crByDay.get(today) || 0,
+          widerstanden_heute: d.crByDay.get(today) || 0, cheat_day: isCheat(today),
           gespart_eur: sv ? Math.round(sv.sum*100)/100 : null,
           letzte: last ? new Date(last).toISOString() : null
         }})
@@ -753,10 +781,19 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
   function renderToday(){
     const today = dayStart(Date.now()), d = D();
     const t = d.byDay.get(today) || 0, y = d.byDay.get(addDays(today,-1)) || 0;
-    const g = goalFor(today);
-    $("todayCount").textContent = t;
+    const cheatToday = isCheat(today);
+    const g = cheatToday ? null : goalFor(today);
+    $("todayCount").classList.toggle("cheat", cheatToday);
+    if (cheatToday){
+      const raw = d.rawByDay.get(today) || 0;
+      $("todayCount").textContent = "Cheat Day";
+      $("todayLabel").textContent = "Heute wird nicht gezählt" + (raw ? ` · ${raw} erfasst` : "");
+    } else {
+      $("todayCount").textContent = t;
+      $("todayLabel").textContent = t === 1 ? "Zigarette heute" : "Zigaretten heute";
+    }
     $("todayCount").classList.toggle("over", g != null && t > g);
-    $("todayLabel").textContent = t === 1 ? "Zigarette heute" : "Zigaretten heute";
+    renderCheatBtn();
 
     // Ziel
     if (g != null){
@@ -772,7 +809,7 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
 
     // Vergleich mit gestern bis zur gleichen Uhrzeit
     const cmp = $("compare");
-    if (d.cig.length && d.firstDay < today){
+    if (!cheatToday && !isCheat(addDays(today,-1)) && d.cig.length && d.firstDay < today){
       const off = Date.now() - today, yS = addDays(today,-1);
       const ySame = d.cig.filter(ts => ts >= yS && ts < yS + off).length;
       const diff = t - ySame;
@@ -783,15 +820,15 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
 
     // Kennzahlen
     const daysKnown = daysBetween(d.firstDay, today);
-    $("sYesterday").textContent = d.any && daysKnown >= 1 ? y : "–";
+    $("sYesterday").textContent = !(d.any && daysKnown >= 1) ? "–" : isCheat(addDays(today,-1)) ? "Cheat" : y;
     if (daysKnown >= 1){
       const n7 = Math.min(7, daysKnown);
-      $("sAvg7").textContent = fmtNum(avgDays(d.byDay, addDays(today,-n7), n7));
+      $("sAvg7").textContent = fmtAvg(avgDays(d.byDay, addDays(today,-n7), n7));
     } else $("sAvg7").textContent = "–";
-    $("sAvgPrev").textContent = daysKnown >= 14 ? fmtNum(avgDays(d.byDay, addDays(today,-14), 7)) : "–";
+    $("sAvgPrev").textContent = daysKnown >= 14 ? fmtAvg(avgDays(d.byDay, addDays(today,-14), 7)) : "–";
     $("sResist").textContent = d.crByDay.get(today) || 0;
     let gDays = 0, gOk = 0;
-    for (let i=1;i<=7;i++){ const day = addDays(today,-i); if (day < d.firstDay) break; const gg = goalFor(day); if (gg == null) continue; gDays++; if ((d.byDay.get(day)||0) <= gg) gOk++; }
+    for (let i=1;i<=7;i++){ const day = addDays(today,-i); if (day < d.firstDay) break; if (isCheat(day)) continue; const gg = goalFor(day); if (gg == null) continue; gDays++; if ((d.byDay.get(day)||0) <= gg) gOk++; }
     $("sGoal7").textContent = gDays ? `${gOk}/${gDays}` : "–";
     const sv = savedBetween(0, today);
     const neg = !!(sv && sv.days && sv.sum < 0);
@@ -801,6 +838,34 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
     renderSince();
     renderTimeline();
   }
+
+  // Cheat-Day-Schalter (zweimal tippen zum Bestätigen)
+  let cheatConfirm = null, cheatTimer = null;
+  function cheatButton(btn, day, isToday){
+    const on = isCheat(day), key = (isToday ? "t" : "l") + day;
+    const confirm = cheatConfirm === key;
+    btn.classList.toggle("confirm", confirm);
+    if (isToday){
+      // Kleiner pinker Button oben rechts
+      btn.classList.toggle("on", on && !confirm);
+      btn.textContent = confirm ? (on ? "Aufheben?" : "Sicher?") : on ? "Cheat Day ✕" : "Cheat Day";
+      btn.title = on ? "Cheat Day für heute aufheben" : "Heute zum Cheat Day machen (zweimal tippen)";
+    } else
+    btn.textContent = confirm ? (on ? "Wirklich aufheben? Nochmal tippen" : "Wirklich? Nochmal tippen")
+      : on ? "Cheat Day für diesen Tag aufheben" : "Diesen Tag als Cheat Day markieren";
+    btn.onclick = () => {
+      if (cheatConfirm === key){
+        cheatConfirm = null; clearTimeout(cheatTimer);
+        setCheat(day, !on);
+        toast(!on ? (isToday ? "Heute ist Cheat Day – es wird nicht gezählt" : `${fmtDay(day)} ist jetzt ein Cheat Day`) : "Cheat Day aufgehoben – der Tag zählt wieder");
+      } else {
+        cheatConfirm = key; clearTimeout(cheatTimer);
+        cheatTimer = setTimeout(() => { cheatConfirm = null; renderCheatBtn(); renderList(); }, 4000);
+      }
+      renderCheatBtn(); renderList();
+    };
+  }
+  function renderCheatBtn(){ cheatButton($("cheatBtn"), dayStart(Date.now()), true); }
 
   // Zeitleiste gestern / heute
   function renderTimeline(){
@@ -816,9 +881,9 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
       svg += `<text x="${gx}" y="${H-4}" text-anchor="middle">${h}</text>`;
     }
     rows.forEach((row, i) => {
-      const y = rowY[i], nz = row.items.filter(r => r.k !== "v").length;
+      const y = rowY[i], nz = row.items.filter(r => r.k !== "v").length, ch = isCheat(row.day);
       svg += `<text x="0" y="${y-1}" style="font-size:10px;font-weight:600;fill:var(--ink)">${row.name}</text>`;
-      svg += `<text x="0" y="${y+11}">${nz} ${nz === 1 ? "Zigarette" : "Zig."}</text>`;
+      svg += `<text x="0" y="${y+11}">${ch ? "Cheat Day" : `${nz} ${nz === 1 ? "Zigarette" : "Zig."}`}</text>`;
       svg += `<line x1="${L}" x2="${R}" y1="${y}" y2="${y}" stroke="var(--muted)" stroke-width="1.5" stroke-linecap="round" opacity=".45"/>`;
       if (i === 1){
         const nx = x(Date.now(), today);
@@ -826,7 +891,7 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
         svg += `<line x1="${nx}" x2="${nx}" y1="${y-10}" y2="${y+10}" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"><title>jetzt</title></line>`;
       }
       if (i === 1){
-        const cg = D().cig, lastC = cg[cg.length-1], gp = lastC ? gapFor(lastC) : 0;
+        const cg = D().allCig, lastC = cg[cg.length-1], gp = lastC && !isCheat(today) ? gapFor(lastC) : 0;
         if (gp && lastC + gp > today){
           const x0 = x(Math.max(lastC, today), today), x1 = x(Math.min(lastC + gp, addDays(today,1)), today);
           svg += `<rect x="${x0}" y="${y-7}" width="${Math.max(0, x1-x0)}" height="14" rx="7" fill="var(--good)" opacity=".3"><title>Wartezeit bis ${fmtTime(lastC + gp)} Uhr</title></rect>`;
@@ -834,7 +899,8 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
       }
       row.items.forEach(r => {
         const cx = x(r.ts, row.day);
-        if (r.k === "v") svg += `<circle cx="${cx}" cy="${y}" r="4.5" fill="var(--card)" stroke="var(--good)" stroke-width="2.2"><title>${fmtTime(r.ts)} Uhr – widerstanden</title></circle>`;
+        if (ch) svg += `<circle cx="${cx}" cy="${y}" r="4.5" fill="var(--muted)" fill-opacity=".45"><title>${fmtTime(r.ts)} Uhr – Cheat Day</title></circle>`;
+        else if (r.k === "v") svg += `<circle cx="${cx}" cy="${y}" r="4.5" fill="var(--card)" stroke="var(--good)" stroke-width="2.2"><title>${fmtTime(r.ts)} Uhr – widerstanden</title></circle>`;
         else svg += `<circle cx="${cx}" cy="${y}" r="5" fill="var(--warn)" fill-opacity=".8" stroke="var(--card)" stroke-width="1"><title>${fmtTime(r.ts)} Uhr</title></circle>`;
       });
     });
@@ -842,6 +908,7 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
 
     // Liste der Uhrzeiten von gestern
     const y = rows[0].items, cigs = y.filter(r => r.k !== "v");
+    if (isCheat(yd)){ $("ydTimes").innerHTML = '<span class="chip cheat">Gestern war Cheat Day – nicht gezählt</span>'; $("ydGap").textContent = ""; return; }
     $("ydTimes").innerHTML = y.length
       ? y.map(r => r.k === "v" ? `<span class="chip res" title="widerstanden">✓ ${fmtTime(r.ts)}</span>` : `<span class="chip time">${fmtTime(r.ts)}</span>`).join("")
       : (D().firstDay <= yd ? '<span class="chip low">Gestern rauchfrei!</span>' : '<span class="small muted">Für gestern gibt es noch keine Einträge.</span>');
@@ -855,7 +922,7 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
   }
 
   function renderGap(last){
-    const gap = gapFor(Date.now());
+    const gap = isCheat(dayStart(Date.now())) ? 0 : gapFor(Date.now());
     const btn = $("smokeBtn"), sub = $("smokeSub"), box = $("gapBox");
     if (!gap || !last){ box.hidden = true; sub.hidden = true; btn.classList.remove("wait"); return; }
     const el = Date.now() - last, rem = gap - el;
@@ -875,7 +942,7 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
   }
 
   function renderSince(){
-    const c = D().cig, last = c[c.length-1];
+    const c = D().allCig, last = c[c.length-1];
     renderGap(last);
     if (!last){ $("since").textContent = "–"; $("lastAt").textContent = "Noch keine Zigarette erfasst"; return; }
     const ms = Math.max(0, Date.now() - last);
@@ -891,6 +958,7 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
   function renderList(){
     const v = $("listDate").value; if (!v) return;
     const s = parseDate(v), e = addDays(s,1);
+    cheatButton($("cheatListBtn"), s, false);
     const items = [...recs].filter(([,r]) => r.ts >= s && r.ts < e).sort((a,b) => a[1].ts - b[1].ts);
     const ul = $("dayList"); ul.innerHTML = "";
     if (!items.length){ ul.innerHTML = '<li class="muted small" style="justify-content:center">Keine Einträge</li>'; return; }
@@ -943,7 +1011,7 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
     });
     const nv = items.length - nz;
     const sum = document.createElement("li"); sum.className = "muted small";
-    sum.textContent = `Zigaretten: ${nz}` + (nv ? ` · widerstanden: ${nv}` : "");
+    sum.textContent = `Zigaretten: ${nz}` + (nv ? ` · widerstanden: ${nv}` : "") + (isCheat(s) ? " · Cheat Day, zählt nicht" : "");
     ul.append(sum);
   }
 
@@ -966,7 +1034,9 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
       s += `<line x1="${padL}" x2="${W}" y1="${y(gv)}" y2="${y(gv)}" stroke="var(--line)" stroke-width="1"/>`;
       s += `<text x="${padL-4}" y="${y(gv)+3}" text-anchor="end">${fmtNum(gv)}</text>`;
     });
+    if (opts.cheat) opts.cheat.forEach((c,i) => { if (c) s += `<rect x="${padL + i*cw + (cw-bw)/2}" y="${padT}" width="${bw}" height="${H-padT-padB}" rx="${Math.min(3,bw/3)}" fill="var(--line)"><title>${esc(opts.titles ? opts.titles[i] : "")}</title></rect>`; });
     vals.forEach((v,i) => {
+      if (opts.cheat && opts.cheat[i]) return;
       const x = padL + i*cw + (cw-bw)/2;
       const col = (opts.colors && opts.colors[i]) || "var(--bar)";
       const h = Math.max(v > 0 ? 1.5 : 0, (H-padT-padB)*(v/top));
@@ -995,29 +1065,35 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
     }
     const today = dayStart(Date.now()), start = rangeStart();
     const nDays = daysBetween(start, today) + 1, end = addDays(today,1);
-    const inRange = [...recs.values()].filter(r => r.ts >= start && r.ts < end);
+    const inRange = [...recs.values()].filter(r => r.ts >= start && r.ts < end && !isCheat(dayStart(r.ts)));
 
     // Verlauf
-    const days = [], vals = [], labels = [], titles = [], goals = [];
+    const days = [], vals = [], labels = [], titles = [], goals = [], cheatMask = [];
     const every = nDays <= 10 ? 1 : nDays <= 31 ? 5 : nDays <= 92 ? 14 : Math.ceil(nDays/6);
     for (let i=0;i<nDays;i++){
-      const day = addDays(start,i); days.push(day); vals.push(d.byDay.get(day)||0); goals.push(goalFor(day));
-      labels.push(i % every === 0 ? fmtDay(day) : ""); titles.push(fmtDay(day));
+      const day = addDays(start,i), ch = isCheat(day);
+      days.push(day); cheatMask.push(ch); vals.push(ch ? 0 : d.byDay.get(day)||0); goals.push(ch ? null : goalFor(day));
+      labels.push(i % every === 0 ? fmtDay(day) : ""); titles.push(fmtDay(day) + (ch ? " (Cheat Day)" : ""));
     }
-    const ma = vals.map((_,i) => { const sl = vals.slice(Math.max(0,i-6), i+1); return sl.reduce((a,b)=>a+b,0)/sl.length; });
+    const counted = vals.filter((_,i) => !cheatMask[i]);
+    const nCheat = nDays - counted.length;
+    const ma = vals.map((_,i) => { if (cheatMask[i]) return null; const sl = vals.slice(Math.max(0,i-6), i+1).filter((_,j) => !cheatMask[Math.max(0,i-6)+j]); return sl.length ? sl.reduce((a,b)=>a+b,0)/sl.length : null; });
     const hasGoal = goals.some(g => g != null);
     $("goalLegend").style.display = hasGoal ? "" : "none";
-    $("trendChart").innerHTML = barChart(vals, labels, { titles, line: nDays >= 3 ? ma : null, goal: hasGoal ? goals : null, h:160 });
-    const total = vals.reduce((a,b)=>a+b,0);
-    let txt = `Ø ${fmtNum(total/nDays)} pro Tag · insgesamt ${total} · höchster Tag ${Math.max(...vals)} · niedrigster Tag ${Math.min(...vals)}.`;
+    $("trendChart").innerHTML = barChart(vals, labels, { titles, line: nDays >= 3 ? ma : null, goal: hasGoal ? goals : null, cheat: nCheat ? cheatMask : null, h:160 });
+    const total = counted.reduce((a,b)=>a+b,0);
+    let txt = counted.length
+      ? `Ø ${fmtNum(total/counted.length)} pro Tag · insgesamt ${total} · höchster Tag ${Math.max(...counted)} · niedrigster Tag ${Math.min(...counted)}.`
+      : "Im Zeitraum gibt es nur Cheat Days.";
+    if (nCheat) txt += ` ${nCheat} ${nCheat === 1 ? "Cheat Day" : "Cheat Days"} im Zeitraum (grau, nicht gezählt).`;
     if (hasGoal){
       let gd = 0, ok = 0;
       days.forEach((day,i) => { if (goals[i] == null || day === today) return; gd++; if (vals[i] <= goals[i]) ok++; });
       if (gd) txt += ` Ziel an ${ok} von ${gd} Tagen eingehalten.`;
     }
-    if (nDays >= 14){
-      const half = Math.floor(nDays/2);
-      const a1 = vals.slice(0,half).reduce((a,b)=>a+b,0)/half, a2 = vals.slice(nDays-half).reduce((a,b)=>a+b,0)/half;
+    if (counted.length >= 14){
+      const half = Math.floor(counted.length/2);
+      const a1 = counted.slice(0,half).reduce((a,b)=>a+b,0)/half, a2 = counted.slice(counted.length-half).reduce((a,b)=>a+b,0)/half;
       if (a1 > 0){ const pct = Math.round((a2-a1)/a1*100);
         txt += pct < 0 ? ` Die zweite Hälfte liegt ${-pct} % unter der ersten – gut so!` : pct > 0 ? ` Die zweite Hälfte liegt ${pct} % über der ersten.` : ""; }
     }
@@ -1059,7 +1135,8 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
     // Uhrzeiten (Zigaretten)
     const hours = new Array(24).fill(0), wd = new Array(7).fill(0), crH = new Array(24).fill(0);
     inRange.forEach(r => { const dt = new Date(r.ts); if (r.k === "v") crH[dt.getHours()]++; else { hours[dt.getHours()]++; wd[(dt.getDay()+6)%7]++; } });
-    const hAvg = hours.map(v => v/nDays);
+    const nCounted = Math.max(1, counted.length);
+    const hAvg = hours.map(v => v/nCounted);
     const active = hours.map((v,i) => v > 0 ? i : -1).filter(i => i >= 0);
     const peaks = [...hAvg.keys()].filter(i => hAvg[i] > 0).sort((a,b) => hAvg[b]-hAvg[a]).slice(0,3);
     let lows = [];
@@ -1081,7 +1158,7 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
 
     // Wochentage
     const wdDays = new Array(7).fill(0);
-    days.forEach(day => wdDays[(new Date(day).getDay()+6)%7]++);
+    days.forEach((day,i) => { if (!cheatMask[i]) wdDays[(new Date(day).getDay()+6)%7]++; });
     const wdAvg = wd.map((v,i) => wdDays[i] ? v/wdDays[i] : 0), wdMax = Math.max(...wdAvg);
     $("wdChart").innerHTML = barChart(wdAvg, WD, { colors: wdAvg.map(v => v === wdMax && v > 0 ? "var(--warn)" : "var(--bar)"), h:130 });
 
@@ -1109,7 +1186,7 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
         ${tile(all && all.days ? perDay : null, w => `${w} Ø pro Tag`)}
         ${tile(all && all.days ? perDay*365 : null, w => `${w}, aufs Jahr gerechnet`, true)}
       </div>
-      <p class="small muted" style="margin:10px 0 0">Ausgegeben im Zeitraum: ${fmtEur(spentRange)}. Gerechnet mit ${fmtNum(m.base)} Zigaretten pro Tag vorher und ${fmtEur(m.ppc)} pro Zigarette; gezählt werden abgeschlossene Tage.</p>`;
+      <p class="small muted" style="margin:10px 0 0">Ausgegeben im Zeitraum: ${fmtEur(spentRange)}. Gerechnet mit ${fmtNum(m.base)} Zigaretten pro Tag vorher und ${fmtEur(m.ppc)} pro Zigarette; gezählt werden abgeschlossene Tage ohne Cheat Days.</p>`;
   }
 
   function render(){
@@ -1149,10 +1226,10 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
   const buzz = () => { try{ navigator.vibrate && navigator.vibrate(30); }catch(e){} };
   $("smokeBtn").onclick = () => {
     buzz();
-    const prevC = D().cig, prev = prevC[prevC.length-1], gp = gapFor(Date.now());
+    const prevC = D().allCig, prev = prevC[prevC.length-1], gp = isCheat(dayStart(Date.now())) ? 0 : gapFor(Date.now());
     const id = addRec(Date.now(), "z");
-    const t = D().byDay.get(dayStart(Date.now())) || 0, g = goalFor(dayStart(Date.now()));
-    let title = `Erfasst um ${fmtTime(Date.now())} Uhr`;
+    const t = D().byDay.get(dayStart(Date.now())) || 0, g = isCheat(dayStart(Date.now())) ? null : goalFor(dayStart(Date.now()));
+    let title = `Erfasst um ${fmtTime(Date.now())} Uhr` + (isCheat(dayStart(Date.now())) ? " · Cheat Day, zählt nicht" : "");
     if (g != null) title += t <= g ? ` · noch ${g - t} bis zum Ziel` : ` · ${t - g} über dem Ziel`;
     if (gp && prev){
       const el = Date.now() - prev;
@@ -1232,7 +1309,9 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
     const d = D(), today = dayStart(Date.now());
     const n = Math.min(7, daysBetween(d.firstDay, today));
     if (n < 1) return toast("Dafür brauche ich mindestens einen vollständigen Tag");
-    $("setBase").value = fmtNum(avgDays(d.byDay, d.firstDay, n));
+    const av = avgDays(d.byDay, d.firstDay, n);
+    if (av == null) return toast("In den ersten Tagen gibt es nur Cheat Days");
+    $("setBase").value = fmtNum(av);
     toast(`Ø der ersten ${n} ${n === 1 ? "Tages" : "Tage"} übernommen`);
   };
   $("saveSettings").onclick = () => {
