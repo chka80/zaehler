@@ -1,6 +1,6 @@
 // Service Worker: macht die App offline nutzbar.
 // Bei Änderungen an der App die Versionsnummer erhöhen, damit Handys die neue Version laden.
-const CACHE = "rauchfrei-v3b";
+const CACHE = "rauchfrei-v3g";
 const FILES = [
   "./index.html",
   "./manifest.webmanifest",
@@ -28,7 +28,8 @@ self.addEventListener("activate", e => {
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
   e.respondWith(
-    fetch(e.request)
+    // "no-cache": immer beim Server nachfragen, ob es eine neue Version gibt (nicht den Browser-Zwischenspeicher nutzen)
+    fetch(e.request, { cache: "no-cache" })
       .then(res => {
         if (res.ok && new URL(e.request.url).origin === location.origin) {
           const copy = res.clone();
