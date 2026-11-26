@@ -67,8 +67,8 @@ h2{font-size:1rem;margin:0 0 10px;font-weight:650}
   box-shadow:0 6px 18px rgba(15,118,110,.25);transition:transform .08s}
 .bigbtn:active,.resistbtn:active{transform:scale(.97)}
 .bigbtn.wait{background:var(--muted);box-shadow:none}
-.bigbtn:disabled,.bigbtn.wait:disabled{background:var(--line);color:var(--muted);box-shadow:none;cursor:default;transform:none}
-.resistbtn:disabled{background:var(--bg);border-color:var(--line);color:var(--muted);cursor:default;transform:none}
+.bigbtn.cheatday,.bigbtn.wait.cheatday{background:var(--line);color:var(--muted);box-shadow:none}
+.resistbtn.cheatday{background:var(--bg);border-color:var(--line);color:var(--muted)}
 .count.cheat{font-size:2.4rem;color:var(--muted);padding:10px 0 4px}
 .cheatbtn{display:block;margin:-4px auto 14px;font:inherit;font-size:.88rem;background:none;border:0;color:var(--muted);text-decoration:underline;cursor:pointer;padding:6px 10px}
 .cheatbtn.confirm{color:var(--warn);font-weight:700;text-decoration:none}
@@ -375,7 +375,7 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
         </div>
       </details>
     </div>
-    <p class="small muted" style="text-align:center;margin:4px 0 0">App-Version 26.11. (g)</p>
+    <p class="small muted" style="text-align:center;margin:4px 0 0">App-Version 26.11. (h)</p>
   </section>
 </div>
 
@@ -796,8 +796,8 @@ svg.chart text{fill:var(--muted);font-size:9px;font-family:inherit}
       $("todayLabel").textContent = t === 1 ? "Zigarette heute" : "Zigaretten heute";
     }
     $("todayCount").classList.toggle("over", g != null && t > g);
-    // Am Cheat Day werden die Erfassen-Buttons ausgegraut
-    $("smokeBtn").disabled = cheatToday; $("resistBtn").disabled = cheatToday;
+    // Am Cheat Day sind die Erfassen-Buttons grau, bleiben aber benutzbar
+    $("smokeBtn").classList.toggle("cheatday", cheatToday); $("resistBtn").classList.toggle("cheatday", cheatToday);
     renderCheatBtn();
 
     // Ziel
